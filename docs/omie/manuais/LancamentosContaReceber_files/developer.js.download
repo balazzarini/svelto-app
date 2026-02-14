@@ -1,0 +1,213 @@
+// JavaScript Document
+function ApiGenerateKey(service_id) {
+  $('#regenerateDialog').dialog({
+    title : 'Redefinir Chave',
+    width : 500,
+    resizable : false,
+    modal : true,
+    closeText: 'hide',
+    buttons : [
+      { text: 'Redefinir', click: function() {
+        $('#regenerateDialog').dialog({buttons:'',title:'Redefinindo a Chave'});
+        $('#regenerateDialog').html('<div style=\"margin: 25px; text-align: center; font-weight: bold\"><img src="/wp-content/themes/aerussportal/images/loadingAnimation.gif" /><br /><br />Por favor aguarde...</div>');
+        post_to_url(document.URL, {
+          'action'     : 'genkey',
+          'service_id' : service_id 
+        });
+      }},
+      { text: 'Cancelar', click: function() {
+        $( this ).dialog( "close" );
+      }},
+    ]
+  });
+}
+
+function LogDetails(app_token, id) {
+  $('#request-endpoint, #error-list, #api-info, #response-code').hide();
+  $('#logDetailsContent .progress').show();
+
+  $('#logDetails').modal('show');
+
+  $.get('?action=apilogs&app_token='+app_token+'&details='+id, function(out) {
+    $('#logDetailsContent .progress').hide();
+    if (out.status == "success") {
+      if (out.endpoint) {
+        $('#request-endpoint').html(out.endpoint).show();
+      }
+
+      $('#api-detail-request-id').val(id);
+
+      if (out.retry || out.breadcrumb) {
+        $('#api-info').show().html( out.retry + out.breadcrumb );
+      }
+
+      if (out.request) {
+        $('#request-code').html( prettyPrintJson.toHtml(out.request) );
+      }
+
+      if(typeof out.details !== 'undefined'){
+        if (out.details.request_ip) {
+          $('#request-ip').html( out.details.request_ip );
+        }
+        if (out.details.request_user) {
+          $('#request-user').html( out.details.request_user );
+        }
+        if (out.details.request_user_agent) {
+          $('#request-user-agent').html( out.details.request_user_agent );
+        }
+      }
+      
+      if (out.errors) {
+        $('#error-list').show();
+        $('#error-list pre').html( typeof out.errors == "object" ? prettyPrintJson.toHtml(out.errors) : out.errors );
+      }
+
+      if (out.response) {
+        $('#response-code').show().html( typeof out.response == "object" ? prettyPrintJson.toHtml(out.response) : out.response )
+      }
+
+      if (typeof out.details !== 'undefined' && typeof out.details.cache_ref_id !== 'undefined') {
+        $('#response-cache').show().attr('title', out.details.cache_ref_id).html(
+          '<span class="glyphicon glyphicon-info-sign" style="margin-right: 3px; font-size: 12px" aria-hidden="true"></span>' +
+          'Solicitação redundante, dados cacheados'
+        )
+      } else {
+        $('#response-cache').hide().attr('title', '').html('')
+      }
+    }
+    // $('#logDetailsContent').html(out);
+  })
+}
+
+function ApiCreateKey(app_token) {
+  post_to_url(document.URL, {
+    'action'     : 'genkey',
+    'app_token' : app_token 
+  });
+}
+
+function ApiRedefineKey(app_token) {
+  prompt('Tem certeza que deseja redefinir essa chave de acesso?\nIsso fará com que todas integrações atuais deixem de funcionar.\n\nResponda SIM para continuar') == 'SIM' && post_to_url(document.URL, {
+    'action'     : 'genkey',
+    'app_token' : app_token 
+  });
+}
+
+function ApiDownloadKey(app_token) {
+  post_to_url(document.URL, {
+    'action'     : 'downloadkey',
+    'app_token' : app_token 
+  }, 'GET');
+}
+function ApiLogs(app_token) {
+  post_to_url(document.URL, {
+    'action'     : 'apilogs',
+    'app_token' : app_token 
+  }, 'GET');
+}
+function WebhookSetup(app_token, endpoint_token) {
+  post_to_url(document.URL, {
+    'action'     : 'webhooks',
+    'app_token'  : app_token,
+    'endpoint_token' : (typeof endpoint_token !== 'undefined' ? endpoint_token : "")
+  }, 'GET');
+}
+
+function post_to_url(path, params, method, target) {
+    method = method || "post"; // Set method to post by default, if not specified.
+    target = target || "_top"; // Set default target to _top
+
+    // The rest of this code assumes you are not using a library.
+    // It can be made less wordy if you use one.
+    var form = document.createElement("form");
+    form.setAttribute("method", method);
+    form.setAttribute("target", target);
+    form.setAttribute("action", path);
+
+    for(var key in params) {
+        if(params.hasOwnProperty(key)) {
+            var hiddenField = document.createElement("input");
+            hiddenField.setAttribute("type", "hidden");
+            hiddenField.setAttribute("name", key);
+            hiddenField.setAttribute("value", params[key]);
+
+            form.appendChild(hiddenField);
+         }
+    }
+
+    document.body.appendChild(form);
+    form.submit();
+}
+
+function apiLogRefresh(e) {
+  d=$('#filter_date').val();
+  var params = {
+    "action": window.omieDeveloper.action,
+    "app_token": window.omieDeveloper.app_token,
+    "event_type": window.omieDeveloper.event_type,
+    "page": $(e.target).attr('data-page'),
+    "filter_date": d.substr(-4)+'-'+d.substr(3,2)+'-'+d.substr(0,2),
+    "filter_method":  $('#filter_method').val(),
+    "filter_http_result":  $('#filter_http_result').val()
+  };
+  e.preventDefault();
+
+  post_to_url(location.origin + location.pathname, params, 'GET', '_top');
+}
+
+function syntaxHighlight(json) {
+    if (typeof json != 'string') {
+         json = JSON.stringify(json, undefined, 2);
+    }
+    json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    var out = json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
+        var cls = 'number';
+        if (/^"/.test(match)) {
+            if (/:$/.test(match)) {
+                cls = 'key';
+            } else {
+                cls = 'string';
+            }
+        } else if (/true|false/.test(match)) {
+            cls = 'boolean';
+        } else if (/null/.test(match)) {
+            cls = 'null';
+        }
+        return '<span class="' + cls + '">' + match + '</span>';
+    });
+    return out;
+}
+
+function formatJsonCode(e) {
+  try {
+    var parsed_text = JSON.stringify( JSON.parse(e.text()), undefined, 2);
+    e.html( syntaxHighlight(parsed_text) );
+    return true;
+  } catch (e) {
+    console.error('Invalid JSON ' + e.toString());
+  }
+}
+
+$(function() {
+  $('.method-example-code').each(function(i,e) {
+    formatJsonCode($(e));
+  });
+  $('.api-list-refresh').on('click', apiLogRefresh);
+  $('button[data-example]').on('click', function() {
+    var params = {
+      // 'APP_KEY': $(this).data('app-key'),
+      // 'APP_SECRET': $(this).data('app-secret'),
+      'ENDPOINT': $('#section-endpoint code').text(),
+      'OMIE_CALL': $(this).data('method'),
+      'PARAMS': $(this).data('example'),
+    };
+
+    post_to_url('/developer/api-test/', params, 'GET', '_blank');
+  })
+})
+
+// $(document).on('click', '.panel-heading', function(e){
+//   var id = $(this).attr('aria-controls');
+//   $('.panel-collapse').addClass('collapse');
+//   $('#' + id).removeClass('collapse');
+// });

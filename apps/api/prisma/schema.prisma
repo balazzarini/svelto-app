@@ -1,0 +1,453 @@
+//
+// SVELTO SAAS SCHEMA DE BANCO DE DADOS (VERSION 2.4 - DISPUTE RESOLUTION)
+// Status: Atualizado com ConciliationCandidate
+//
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// 1. NÚCLEO ADMINISTRATIVO (Auth & Tenancy)
+// =============================================================================
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  document  String?  // CNPJ/CPF
+  settings  Json?    // Ex: { "fiscalCloseDay": 25 }
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relações do Sistema
+  users           User[]
+  integrations    Integration[]
+  transactions    Transaction[]
+  settlements     Settlement[]
+  payouts         Payout[]
+  auditLogs       AuditLog[]
+  
+  // Relações do Módulo ERP
+  erpReceivables  ErpReceivable[] 
+  erpCustomers    ErpCustomer[]   
+  erpPayables     ErpPayable[]    // <--- ADICIONADO: Back-relation necessário
+
+  @@map("tenants")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  tenantId     String
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         UserRole @default(MEMBER)
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  auditLogs    AuditLog[]
+
+  @@index([tenantId])
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  MEMBER
+}
+
+// =============================================================================
+// 2. INTEGRAÇÕES (Conectores)
+// =============================================================================
+
+model Integration {
+  id        String              @id @default(uuid())
+  tenantId  String
+  name      String
+  provider  IntegrationProvider
+  
+  // Security: Envelope Encryption (Ciphertext + IV + KeyID)
+  credentials Json
+
+  // Configs & State
+  settings    Json?
+  
+  status      IntegrationStatus @default(ACTIVE)
+  lastSyncAt  DateTime? 
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  
+  // Relações Financeiras
+  transactions   Transaction[]
+  payouts        Payout[]
+  
+  // Relações ERP
+  erpReceivables ErpReceivable[]
+  erpCustomers   ErpCustomer[]
+  erpPayables    ErpPayable[]    // <--- ADICIONADO: Back-relation necessário
+
+
+  @@index([tenantId])
+  @@map("integrations")
+}
+
+enum IntegrationProvider {
+  MERCADOPAGO
+  OMIE
+}
+
+enum IntegrationStatus {
+  ACTIVE
+  ERROR
+  PAUSED
+}
+
+// =============================================================================
+// 3. CORE OPERACIONAL (A Venda / Checkout - Mercado Pago)
+// =============================================================================
+
+enum TransactionStatus {
+  PENDING
+  MATCHED     // Vínculo único e forte encontrado
+  AMBIGUOUS   // Vínculo incerto ou múltiplo (Disputa)
+  AUDITED     
+  CONCILIATED // Dinheiro liberado na Conta Virtual
+  PAID_OUT    // Dinheiro sacado para o Banco
+  DIVERGENT
+  IGNORED
+  CHARGEBACK  
+  REFUNDED    // Dinheiro devolvido voluntariamente
+  ERROR_SYNC
+}
+
+// Adicionar o Enum para Status Financeiro (Proposta aprovada)
+enum FinancialStatus {
+  OPEN      // Dinheiro a receber
+  SETTLED   // Dinheiro na conta
+  BLOCKED   // Dinheiro retido (Disputa)
+  REVERSED  // Dinheiro saiu (Chargeback/Refund)
+}
+
+model Transaction {
+  id              String  @id @default(uuid())
+  tenantId        String
+  integrationId   String
+
+  // Identificadores
+  gatewayId          String  
+  externalReference  String? 
+  authorizationCode  String? 
+  
+  // Identificação do Recebedor
+  collectorId        String? 
+
+  // Tipo de Operação
+  operationType      String? 
+
+  // Dados ERP (Links)
+  erpId              String? 
+  erpStatus          String? 
+
+  // Datas
+  dateEvent      DateTime  
+  dateEstimated  DateTime? 
+  
+  // Dados de Liquidação
+  financialStatus   FinancialStatus @default(OPEN)
+  moneyReleaseDate   DateTime? 
+  moneyVoidDate      DateTime? // Data da saída do dinheiro (Refund/Chargeback)
+  moneyReleaseStatus String?   
+
+  // Engenharia Financeira
+  amountGross        Decimal  @db.Decimal(19, 4) 
+  amountPaidByCustomer Decimal? @default(0) @db.Decimal(19, 4)
+
+  amountMdrFee       Decimal  @default(0) @db.Decimal(19, 4) 
+  amountFinancingFee Decimal  @default(0) @db.Decimal(19, 4) 
+  amountShippingFee  Decimal  @default(0) @db.Decimal(19, 4) 
+  amountTaxes        Decimal  @default(0) @db.Decimal(19, 4) 
+  amountCoupon       Decimal  @default(0) @db.Decimal(19, 4) 
+  
+  amountNetGateway   Decimal  @db.Decimal(19, 4) 
+  
+  // Shadow Accounting
+  amountNetCalculated Decimal? @db.Decimal(19, 4)
+
+  // Payload Bruto
+  rawDetails      Json?    
+
+  // Dados do Pagador
+  payerDocType    String? 
+  payerDocNumber  String? 
+  payerEmail      String?
+  payerName       String?
+
+  // Classificação & Status
+  paymentMethod   String  
+  installments    Int     @default(1)
+  
+  status          TransactionStatus @default(PENDING) // Status interno Svelto
+  gatewayStatus   String? // Status original do gateway
+  statusDetail    String? 
+  matchDescription String? // Descricao da rotina que deu match
+
+  isDisputed      Boolean @default(false)
+  disputeCoverage Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id])
+  integration Integration @relation(fields: [integrationId], references: [id])
+  
+  reconciliations Reconciliation[]
+  
+  // Relacionamento com Candidatos (Para resolução de disputas)
+  candidates      ConciliationCandidate[]
+
+  // Relacionamento com Contas a Pagar (Para Chargebacks/Refunds)
+  erpPayableId      String?
+  erpPayable        ErpPayable?     @relation(fields: [erpPayableId], references: [id])
+
+  @@unique([integrationId, gatewayId])
+  @@index([tenantId, dateEvent])
+  @@index([tenantId, externalReference])
+  @@index([tenantId, authorizationCode]) 
+  @@index([tenantId, operationType]) 
+  @@index([tenantId, collectorId]) 
+  @@map("transactions")
+}
+
+// =============================================================================
+// 3.5. CANDIDATOS DE CONCILIAÇÃO (Para resolução de conflitos/ambiguidade)
+// =============================================================================
+
+model ConciliationCandidate {
+  id              String   @id @default(uuid())
+  transactionId   String
+  erpReceivableId String
+  
+  score           Int      // Pontuação de confiança (0-100)
+  matchReason     String   // "Exact Amount + Date", "NSU Match", "Customer Name Match"
+  
+  createdAt       DateTime @default(now())
+
+  transaction     Transaction   @relation(fields: [transactionId], references: [id])
+  erpReceivable   ErpReceivable @relation(fields: [erpReceivableId], references: [id])
+
+  @@unique([transactionId, erpReceivableId]) 
+  @@index([transactionId])
+  @@map("conciliation_candidates")
+}
+
+// =============================================================================
+// 4. CORE FINANCEIRO (O Dinheiro)
+// =============================================================================
+
+// Nível 1: Liberação na Conta Virtual (Settlement / Release Report)
+model Settlement {
+  id               String   @id @default(uuid())
+  tenantId         String
+  gatewayReference String?  // ID do Lote/Relatório no MP
+  dateSettled      DateTime // Data da liberação
+  amountTotal      Decimal  @db.Decimal(19, 4)
+  
+  tenant           Tenant   @relation(fields: [tenantId], references: [id])
+  reconciliations  Reconciliation[] 
+  
+  payoutId         String?
+  payout           Payout?  @relation(fields: [payoutId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, dateSettled])
+  @@map("settlements")
+}
+
+// Nível 2: Saque para o Banco (Withdrawal / Payout)
+model Payout {
+  id                String   @id @default(uuid())
+  tenantId          String
+  integrationId     String
+  
+  externalReference String?  // ID do Payout no MP (withdrawal_id)
+  dateEvent         DateTime // Data do saque
+  amount            Decimal  @db.Decimal(19, 4)
+  bankAccount       String?  // "Itaú **** 1234" (Metadado)
+  
+  status            PayoutStatus @default(PENDING)
+
+  tenant            Tenant      @relation(fields: [tenantId], references: [id])
+  integration       Integration @relation(fields: [integrationId], references: [id])
+  
+  settlements       Settlement[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("payouts")
+}
+
+enum PayoutStatus {
+  PENDING
+  CONFIRMED_BANK // Batido com o OFX
+  ERROR
+}
+
+// Tabela Pivô (Venda -> Liberação)
+model Reconciliation {
+  id            String   @id @default(uuid())
+  transactionId String
+  settlementId  String
+  amountCovered Decimal  @db.Decimal(19, 4)
+
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+  settlement    Settlement  @relation(fields: [settlementId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@map("reconciliations")
+}
+
+// =============================================================================
+// 5. MÓDULO ERP (Espelhamento de CONTAS A RECEBER do Omie)
+// =============================================================================
+
+// Espelho dos Títulos do ERP (Omie)
+model ErpReceivable {
+  id              String   @id @default(uuid())
+  tenantId        String
+  integrationId   String   // Link com a integração Omie
+
+  // Chaves do Omie
+  erpId           String   // codigo_lancamento_omie (Chave Primária do Omie)
+  erpDocNumber    String?  // numero_documento_fiscal ou cNumTitulo
+  
+  // CHAVES DE CONCILIAÇÃO
+  erpExternalRef  String?  // numero_pedido (Chave Padrão)
+  erpNsu          String?  // nsu (Chave Bancária - A mais forte agora)
+  erpControl      String?  // cPedidoCliente (Chave Ecommerce Custom)
+
+  // DADOS FINANCEIROS & BANCÁRIOS
+  amountValue     Decimal  @db.Decimal(19, 4) // valor_documento
+  bankAccountId   String?  // id_conta_corrente (Para filtro no Match - NOVO!)
+  
+  // Datas
+  dateDue         DateTime // data_vencimento
+  dateEmission    DateTime // data_emissao
+  datePrevision   DateTime // data_previsao
+
+  // Status
+  status          String   // "EM ABERTO", "LIQUIDADO", "CANCELADO"
+  
+  // Dados do Cliente (Para inteligência futura)
+  customerId      String?  // codigo_cliente_fornecedor
+  customerName    String?  // (Opcional)
+  customerDoc     String?  // NOVO: cnpj_cpf (Vem direto da API)
+
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant          Tenant      @relation(fields: [tenantId], references: [id])
+  integration     Integration @relation(fields: [integrationId], references: [id])
+  
+  // Relação inversa adicionada para resolver o erro P1012
+  matchCandidates ConciliationCandidate[]
+
+  @@unique([integrationId, erpId]) 
+  @@index([tenantId, erpExternalRef])
+  @@index([tenantId, erpNsu]) 
+  @@index([tenantId, erpControl]) 
+  @@index([tenantId, bankAccountId]) 
+  @@map("erp_receivables")
+}
+
+// NOVO MODELO: Contas a Pagar (Espelho simplificado para auditoria de saídas)
+model ErpPayable {
+  id              String   @id @default(uuid())
+  tenantId        String
+  integrationId   String
+  
+  erpId           String   // ID do título no Omie
+  erpDocNumber    String?  // Número do documento
+  amountValue     Decimal
+  dateDue         DateTime
+  dateEmission    DateTime
+  
+  status          String   // ABERTO, BAIXADO, CANCELADO
+  
+  customerId      String?  // Link com o cliente (vital para o "Sniper")
+  customerName    String?
+  
+  transactions    Transaction[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant          Tenant      @relation(fields: [tenantId], references: [id])
+  integration     Integration @relation(fields: [integrationId], references: [id])
+
+  @@unique([integrationId, erpId])
+  @@index([customerId])
+}
+
+// Espelho de Clientes do ERP
+model ErpCustomer {
+  id              String   @id @default(uuid())
+  tenantId        String
+  integrationId   String
+
+  erpId           String   // codigo_cliente_omie (PK Omie)
+  erpInternalId   String?  // codigo_cliente_integracao
+  
+  name            String
+  docType         String?  // CNPJ / CPF
+  docNumber       String?  // 12345678000199 (Apenas números)
+  
+  email           String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant          Tenant      @relation(fields: [tenantId], references: [id])
+  integration     Integration @relation(fields: [integrationId], references: [id])
+
+  @@unique([integrationId, erpId])
+  @@index([tenantId, docNumber]) 
+  @@map("erp_customers")
+}
+
+// =============================================================================
+// 6. AUDITORIA (JSONB Diff)
+// =============================================================================
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  tenantId  String
+  userId    String?
+  action    String
+  resource  String
+  resourceId String
+  diff      Json?
+  
+  createdAt DateTime @default(now())
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@map("audit_logs")
+}

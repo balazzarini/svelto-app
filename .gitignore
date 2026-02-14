@@ -1,0 +1,6 @@
+docs/utils.txt
+node_modules/
+dist/
+.env
+.DS_Store
+coverage/

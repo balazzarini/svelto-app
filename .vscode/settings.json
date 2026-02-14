@@ -1,0 +1,10 @@
+{
+    "window.density.editorTabHeight": "compact",
+    "geminicodeassist.agentDebugMode": true,
+    "geminicodeassist.chat.defaultCodeBlockDisplay": "Expanded",
+    "geminicodeassist.codeGenerationPaneViewEnabled": true,
+    "geminicodeassist.inlineSuggestions.nextEditPredictions": true,
+    "geminicodeassist.inlineSuggestions.suggestionSpeed": "Fast",
+    "geminicodeassist.outlines.automaticOutlineGeneration": true,
+    "geminicodeassist.updateChannel": "Insiders"
+}
