@@ -8,6 +8,13 @@ const API_BASE_URL = (isServer && process.env.SERVER_API_URL)
   ? process.env.SERVER_API_URL 
   : (process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3000');
 
+// --- BLOCO DE DEBUG (Remover depois que funcionar) ---
+console.log(`[API DEBUG] Contexto: ${isServer ? 'SERVER (Node)' : 'CLIENT (Browser)'}`);
+console.log(`[API DEBUG] URL Final usada: ${API_BASE_URL}`);
+if (isServer) console.log(`[API DEBUG] Var SERVER_API_URL: ${process.env.SERVER_API_URL}`);
+console.log(`[API DEBUG] Var NEXT_PUBLIC_API_URL: ${process.env.NEXT_PUBLIC_API_URL}`);
+// -----------------------------------------------------
+
 export const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 300000,
