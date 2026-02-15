@@ -12,7 +12,7 @@
   "type": "commonjs",
   "dependencies": {
     "@nestjs/config": "^4.0.2",
-    "@nestjs/schedule": "^4.0.1"
+    "@nestjs/schedule": "^6.1.1"
   },
   "workspaces": [
   "apps/*",
