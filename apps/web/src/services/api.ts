@@ -1,7 +1,12 @@
 import axios from 'axios';
 import { PaginatedResponse, Transaction, DashboardStats, ConciliationCandidate } from '@/types/conciliation';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3000';
+const isServer = typeof window === 'undefined';
+
+// No servidor, tenta usar a URL interna (SERVER_API_URL). Se não houver, usa a pública.
+const API_BASE_URL = (isServer && process.env.SERVER_API_URL) 
+  ? process.env.SERVER_API_URL 
+  : (process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3000');
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
