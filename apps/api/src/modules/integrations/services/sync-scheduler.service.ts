@@ -67,4 +67,11 @@ export class SyncSchedulerService {
       }
     }
   }
+
+  // This service is just to check if the scheduler is alive
+  // It logs a message every 30 seconds
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  handleSchedulerAliveCheck() {
+    this.logger.log('✅ SCHEDULER ESTÁ VIVO: Executando a cada 10 minutos');
+  }
 }
