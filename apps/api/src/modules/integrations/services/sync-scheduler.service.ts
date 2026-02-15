@@ -5,6 +5,8 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { MercadoPagoService } from '../providers/mercadopago.service';
 import { SecurityService, EncryptedData } from '../../security/security.service';
 import { subHours } from 'date-fns';
+import { OmieSyncService } from './omie-sync.service';
+import { OmieCustomerSyncService } from './omie-customer-sync.service';
 
 @Injectable()
 export class SyncSchedulerService {
@@ -14,6 +16,8 @@ export class SyncSchedulerService {
     private readonly prisma: PrismaService,
     private readonly mercadoPagoService: MercadoPagoService,
     private readonly securityService: SecurityService,
+    private readonly omieSyncService: OmieSyncService,
+    private readonly omieCustomerSyncService: OmieCustomerSyncService,
   ) {}
 
   /**
@@ -64,6 +68,40 @@ export class SyncSchedulerService {
       } catch (error) {
         this.logger.error(`❌ Falha no Sync Auto para ${integration.name}: ${error.message}`);
         // Não interrompe o loop para outras integrações
+      }
+    }
+  }
+
+  /**
+   * Executa a cada 1 hora (0 * * * *)
+   * Sincroniza Clientes e Contas a Receber do Omie (Incremental)
+   */
+  @Cron(CronExpression.EVERY_HOUR)
+  async handleOmieHourlySync() {
+    this.logger.log('⏰ Iniciando Job de Sincronização Horária (Omie)...');
+
+    const activeIntegrations = await this.prisma.integration.findMany({
+      where: {
+        provider: 'OMIE',
+        status: 'ACTIVE',
+      },
+    });
+
+    this.logger.log(`🔎 Encontradas ${activeIntegrations.length} integrações Omie ativas.`);
+
+    for (const integration of activeIntegrations) {
+      try {
+        this.logger.log(`🔄 Sync Auto Omie: ${integration.name} (${integration.id})`);
+
+        // 1. Sync Clientes
+        await this.omieCustomerSyncService.syncCustomers(integration.id, integration.tenantId, false);
+
+        // 2. Sync Financeiro
+        await this.omieSyncService.syncReceivables(integration.id, integration.tenantId, undefined, false);
+
+        this.logger.log(`✅ Sync Auto Omie Sucesso: ${integration.name}`);
+      } catch (error) {
+        this.logger.error(`❌ Falha no Sync Auto Omie para ${integration.name}: ${error.message}`);
       }
     }
   }
