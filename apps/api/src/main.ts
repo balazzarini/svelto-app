@@ -6,7 +6,7 @@ async function bootstrap() {
 
   // CONFIGURAÇÃO CORS EXPLÍCITA
   app.enableCors({
-    origin: '*', // Libera apenas o Frontend
+    origin: true, // Permite qualquer origem refletindo-a no header (necessário para credentials: true)
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
   });
